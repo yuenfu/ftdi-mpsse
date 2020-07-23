@@ -26,10 +26,10 @@ rm -rf sample-dynamic.o
 rm -rf sample-static.o
 cp -f ../../include/libMPSSE_i2c.h .
 cp -f ../../include/linux/*.h .
-cp -f ../../lib/linux/i386/* .
+cp -f ../../lib/i2c/linux/$ARCH/* .
 echo ------------------------------------------------
 echo Building sample by linking to static library and running it
-gcc -g -ldl -I. -o sample-static.o sample-static.c libMPSSE.a
+gcc -g -I. -o sample-static.o sample-static.c libMPSSE.a -ldl
 ./sample-static.o
 cd ..
 }
@@ -43,10 +43,10 @@ rm -rf sample-dynamic.o
 rm -rf sample-static.o
 cp -f ../../include/libMPSSE_i2c.h .
 cp -f ../../include/linux/*.h .
-cp -f ../../lib/linux/i386/* .
+cp -f ../../lib/i2c/linux/$ARCH/* .
 echo ------------------------------------------------
 echo Building sample by linking to dynamic library and running it
-gcc -ldl sample-dynamic.c -o sample-dynamic.o
+gcc sample-dynamic.c -o sample-dynamic.o -ldl
 ./sample-dynamic.o
 cd ..
 }
@@ -60,10 +60,10 @@ rm -rf sample-dynamic.o
 rm -rf sample-static.o
 cp -f ../../include/libMPSSE_spi.h .
 cp -f ../../include/linux/*.h .
-cp -f ../../lib/linux/i386/* .
+cp -f ../../lib/spi/linux/$ARCH/* .
 echo ------------------------------------------------
 echo Building sample by linking to static library and running it
-gcc -g -ldl -I. -o sample-static.o sample-static.c libMPSSE.a
+gcc -g -I. -o sample-static.o sample-static.c libMPSSE.a -ldl
 ./sample-static.o
 cd ..
 }
@@ -77,10 +77,10 @@ rm -rf sample-dynamic.o
 rm -rf sample-static.o
 cp -f ../../include/libMPSSE_spi.h .
 cp -f ../../include/linux/*.h .
-cp -f ../../lib/linux/i386/* .
+cp -f ../../lib/spi/linux/$ARCH/* .
 echo ------------------------------------------------
 echo Building sample by linking to dynamic library and running it
-gcc -ldl sample-dynamic.c -o sample-dynamic.o
+gcc sample-dynamic.c -o sample-dynamic.o -ldl
 ./sample-dynamic.o
 cd ..
 }
