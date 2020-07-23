@@ -4,7 +4,7 @@
  * \author FTDI
  * \date 20110512
  *
- * Copyright © 2000-2014 Future Technology Devices International Limited
+ * Copyright ? 2000-2014 Future Technology Devices International Limited
  *
  *
  * THIS SOFTWARE IS PROVIDED BY FUTURE TECHNOLOGY DEVICES INTERNATIONAL LIMITED ``AS IS'' AND ANY EXPRESS
@@ -381,13 +381,13 @@ the shared library folder(/usr/lib or /usr/lib64)\n");
 			printf("		LocId=0x%x\n",devList.LocId);
 			printf("		SerialNumber=%s\n",devList.SerialNumber);
 			printf("		Description=%s\n",devList.Description);
-			printf("		ftHandle=0x%x\n",(unsigned int)devList.ftHandle);/*is 0 unless open*/
+			printf("		ftHandle=%p\n",devList.ftHandle);/*is 0 unless open*/
 		}
 
 		/* Open the first available channel */
 		status = p_SPI_OpenChannel(CHANNEL_TO_OPEN,&ftHandle);
 		APP_CHECK_STATUS(status);
-		printf("\nhandle=0x%x status=0x%x\n",(unsigned int)ftHandle,status);
+		printf("\nhandle=%p status=0x%x\n",ftHandle,status);
 		status = p_SPI_InitChannel(ftHandle,&channelConf);
 		APP_CHECK_STATUS(status);
 

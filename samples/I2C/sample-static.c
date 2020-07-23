@@ -4,7 +4,7 @@
  * \author FTDI
  * \date 20110512
  *
- * Copyright © 2011 Future Technology Devices International Limited
+ * Copyright ? 2011 Future Technology Devices International Limited
  * Company Confidential
  *
  * Project: libMPSSE
@@ -200,13 +200,13 @@ int main()
 			printf("		LocId=0x%x\n",devList.LocId); 
 			printf("		SerialNumber=%s\n",devList.SerialNumber); 
 			printf("		Description=%s\n",devList.Description); 
-			printf("		ftHandle=0x%x\n",devList.ftHandle);/*is 0 unless open*/
+			printf("		ftHandle=%p\n",devList.ftHandle);/*is 0 unless open*/
 		}
 
 		/* Open the first available channel */
 		status = I2C_OpenChannel(CHANNEL_TO_OPEN,&ftHandle);
 		APP_CHECK_STATUS(status);
-		printf("\nhandle=0x%x status=%d\n",ftHandle,status);
+		printf("\nhandle=%p status=%d\n",ftHandle,status);
 		status = I2C_InitChannel(ftHandle,&channelConf);
 		APP_CHECK_STATUS(status);
 
