@@ -1,46 +1,12 @@
-/*!
- * \file sample-static.c
- *
- * \author FTDI
- * \date 20110512
- *
- * Copyright ? 2000-2014 Future Technology Devices International Limited
- *
- *
- * THIS SOFTWARE IS PROVIDED BY FUTURE TECHNOLOGY DEVICES INTERNATIONAL LIMITED ``AS IS'' AND ANY EXPRESS
- * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL FUTURE TECHNOLOGY DEVICES INTERNATIONAL LIMITED
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Project: libMPSSE
- * Module: SPI Sample Application - Interfacing 94LC56B SPI EEPROM
- *
- * Rivision History:
- * 0.1  - 20110512 - Initial version
- * 0.2  - 20110801 - Changed LatencyTimer to 255
- * 					 Attempt to open channel only if available
- *					 Added & modified macros
- *					 Included stdlib.h
- * 0.3  - 20111212 - Added comments
- * 0.41 - 20140903 - Fixed compilation warnings
- *					 Added testing of SPI_ReadWrite()
- */
-
 /******************************************************************************/
-/* 							 Include files										   */
+/* 							 Include files									  */
 /******************************************************************************/
 /* Standard C libraries */
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
 /* OS specific libraries */
-#ifdef _WIN32
-#include<windows.h>
-#endif
+#include<time.h>
 
 /* Include D2XX header*/
 #include "ftd2xx.h"
@@ -49,236 +15,245 @@
 #include "libMPSSE_spi.h"
 
 /******************************************************************************/
-/*								Macro and type defines							   */
+/*							Macro and type defines							  */
 /******************************************************************************/
 /* Helper macros */
-
 #define APP_CHECK_STATUS(exp) {if(exp!=FT_OK){printf("%s:%d:%s(): status(0x%x) \
 != FT_OK\n",__FILE__, __LINE__, __FUNCTION__,exp);exit(1);}else{;}};
 #define CHECK_NULL(exp){if(exp==NULL){printf("%s:%d:%s():  NULL expression \
 encountered \n",__FILE__, __LINE__, __FUNCTION__);exit(1);}else{;}};
 
 /* Application specific macro definations */
-#define SPI_DEVICE_BUFFER_SIZE		256
+#define SPI_CLK_RATE 6000000 //Hz
+#define SPI_DEVICE_BUFFER_SIZE		(0x1000+3) //4kiB + 3B(command + address)
 #define SPI_WRITE_COMPLETION_RETRY		10
-#define START_ADDRESS_EEPROM 	0x00 /*read/write start address inside the EEPROM*/
-#define END_ADDRESS_EEPROM		0x10
-#define RETRY_COUNT_EEPROM		10	/* number of retries if read/write fails */
+#define START_ADDRESS_RAM 	0x00000
+#define END_ADDRESS_RAM		0xD0000
+#define RAM_TEST_BUFFER_SIZE	(END_ADDRESS_RAM-START_ADDRESS_RAM) //832kiB
 #define CHANNEL_TO_OPEN			0	/*0 for first available channel, 1 for next... */
-#define SPI_SLAVE_0				0
-#define SPI_SLAVE_1				1
-#define SPI_SLAVE_2				2
-#define DATA_OFFSET				4
-#define USE_WRITEREAD			0
+#define ADDR_STEP				4
 
 /******************************************************************************/
-/*								Global variables							  	    */
+/*							Global variables								  */
 /******************************************************************************/
 static FT_HANDLE ftHandle;
-static uint8 buffer[SPI_DEVICE_BUFFER_SIZE] = {0};
+static uint8 buffer[SPI_DEVICE_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
+static uint8 ram_buffer[RAM_TEST_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
+static uint8 rand_buffer[RAM_TEST_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
+static struct timespec stime = { 0, 5*(1000000000/SPI_CLK_RATE) }; //sleep 10ms
 
 /******************************************************************************/
-/*						Public function definitions						  		   */
+/*						Public function definitions						 	  */
 /******************************************************************************/
-/*!
- * \brief Writes to EEPROM
- *
- * This function writes a byte to a specified address within the 93LC56B EEPROM
- *
- * \param[in] slaveAddress Address of the I2C slave (EEPROM)
- * \param[in] registerAddress Address of the memory location inside the slave to where the byte
- *			is to be written
- * \param[in] data The byte that is to be written
- * \return Returns status code of type FT_STATUS(see D2XX Programmer's Guide)
- * \sa Datasheet of 93LC56B http://ww1.microchip.com/downloads/en/DeviceDoc/21794F.pdf
- * \note
- * \warning
- */
-static FT_STATUS read_byte(uint8 slaveAddress, uint8 address, uint16 *data)
+static FT_STATUS read_word(uint32 address, uint32 *data)
 {
 	uint32 sizeToTransfer = 0;
-	uint32 sizeTransfered;
+	uint32 sizeTransfered = 0;
 	uint8 writeComplete=0;
 	uint32 retry=0;
 	FT_STATUS status;
 
-	/* CS_High + Write command + Address */
-	sizeToTransfer=1;
+	/* Write command + 4K offset */
+	sizeToTransfer=3;
 	sizeTransfered=0;
-	buffer[0] = 0xC0;/* Write command (3bits)*/
-	buffer[0] = buffer[0] | ( ( address >> 3) & 0x0F );/*5 most significant add bits*/
+	buffer[0] = 0x00; //read command
+	buffer[0] |= ((address >> 6) & 0x3F);
+	buffer[1] = (address << 2) & 0xFF;
+	//printf("address=%08x\n", address);
+	//printf("%02x %02x %02x\n", buffer[0], buffer[1], buffer[2]);
 	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
 		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE);
 	APP_CHECK_STATUS(status);
+	if (FT_OK != status)
+		goto rc;
 
-	/*Write partial address bits */
+	/*Read 4 bytes*/
 	sizeToTransfer=4;
-	sizeTransfered=0;
-	buffer[0] = ( address & 0x07 ) << 5; /* least significant 3 address bits */
-	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BITS);
-	APP_CHECK_STATUS(status);
-
-	/*Read 2 bytes*/
-	sizeToTransfer=2;
 	sizeTransfered=0;
 	status = SPI_Read(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
 		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
+		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+
+	*data = *(uint32 *)buffer;
+	printf("data=%08x\n", *data);
+	printf("%02x %02x %02x %02x\n", buffer[0], buffer[1], buffer[2], buffer[3]);
+
 	APP_CHECK_STATUS(status);
-
-	*data = (uint16)(buffer[1]<<8);
-	*data = (*data & 0xFF00) | (0x00FF & (uint16)buffer[0]);
-
+rc:
 	return status;
 }
-
-/*!
- * \brief Reads from EEPROM
- *
- * This function reads a byte from a specified address within the 93LC56B EEPROM
- *
- * \param[in] slaveAddress Address of the I2C slave (EEPROM)
- * \param[in] registerAddress Address of the memory location inside the slave from where the
- *			byte is to be read
- * \param[in] *data Address to where the byte is to be read
- * \return Returns status code of type FT_STATUS(see D2XX Programmer's Guide)
- * \sa Datasheet of 93LC56B http://ww1.microchip.com/downloads/en/DeviceDoc/21794F.pdf
- * \note
- * \warning
- */
-static FT_STATUS write_byte(uint8 slaveAddress, uint8 address, uint16 data)
+static FT_STATUS read_multi_word(uint32 address, uint8 *data, uint32 length)
 {
 	uint32 sizeToTransfer = 0;
-	uint32 sizeTransfered=0;
+	uint32 sizeTransfered = 0;
 	uint8 writeComplete=0;
 	uint32 retry=0;
 	FT_STATUS status;
 
-	/* Write command EWEN(with CS_High -> CS_Low) */
-	sizeToTransfer=11;
-	sizeTransfered=0;
-	buffer[0]=0x9F;/* SPI_EWEN -> binary 10011xxxxxx (11bits) */
-	buffer[1]=0xFF;
-	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BITS|
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-	APP_CHECK_STATUS(status);
-
-	/* CS_High + Write command + Address */
-	sizeToTransfer=1;
-	sizeTransfered=0;
-	buffer[0] = 0xA0;/* Write command (3bits) */
-	buffer[0] = buffer[0] | ( ( address >> 3) & 0x0F );/*5 most significant add bits*/
-	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE);
-	APP_CHECK_STATUS(status);
-
-	/*Write 3 least sig address bits */
+	/* Write command + 4K offset */
 	sizeToTransfer=3;
 	sizeTransfered=0;
-	buffer[0] = ( address & 0x07 ) << 5; /* least significant 3 address bits */
-	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BITS);
-	APP_CHECK_STATUS(status);
-
-	/* Write 2 byte data + CS_Low */
-	sizeToTransfer=2;
-	sizeTransfered=0;
-	buffer[0] = (uint8)(data & 0xFF);
-	buffer[1] = (uint8)((data & 0xFF00)>>8);
+	buffer[0] = 0x40; //read command
+	buffer[0] |= ((address >> 6) & 0x3F);
+	buffer[1] = (address << 2) & 0xFF;
+	//printf("address=%08x\n", address);
+	//printf("%02x %02x %02x\n", buffer[0], buffer[1], buffer[2]);
 	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
 		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-	APP_CHECK_STATUS(status);
-
-	/* Wait until D0 is high */
-#if 1
-	/* Strobe Chip Select */
-	sizeToTransfer=0;
-	sizeTransfered=0;
-	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BITS|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE);
 	APP_CHECK_STATUS(status);
-#ifndef __linux__
-	Sleep(10);
-#endif
-	sizeToTransfer=0;
+	if (FT_OK != status)
+		goto rc;
+
+	/*Read 4 bytes*/
+	sizeToTransfer=length;
 	sizeTransfered=0;
-	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BITS|
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-	APP_CHECK_STATUS(status);
-#else
-	retry=0;
-	state=FALSE;
-	SPI_IsBusy(ftHandle,&state);
-	while((FALSE==state) && (retry<SPI_WRITE_COMPLETION_RETRY))
-	{
-		printf("SPI device is busy(%u)\n",(unsigned)retry);
-		SPI_IsBusy(ftHandle,&state);
-		retry++;
-	}
-#endif
-	/* Write command EWEN(with CS_High -> CS_Low) */
-	sizeToTransfer=11;
-	sizeTransfered=0;
-	buffer[0]=0x8F;/* SPI_EWEN -> binary 10011xxxxxx (11bits) */
-	buffer[1]=0xFF;
-	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BITS|
+	status = SPI_Read(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
+		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+
+	memcpy(data, buffer, length);
+	//printf("data=%08x\n", *data);
+	//printf("%02x %02x %02x %02x\n", buffer[0], buffer[1], buffer[2], buffer[3]);
+
+	APP_CHECK_STATUS(status);
+rc:
+	return status;
+}
+static FT_STATUS write_base(uint32 base)
+{
+	uint32 sizeToTransfer = 7; //24 + 32 bit = 7 bytes
+	uint32 sizeTransfered = 0;
+	uint8 writeComplete=0;
+	uint32 retry=0;
+	FT_STATUS status;
+
+	buffer[0] = 0x80; //write base command
+	buffer[3] = (base >> 24) & 0xFF;
+	buffer[4] = (base >> 16) & 0xFF;
+	buffer[5] = (base >> 8) & 0xFF;
+	buffer[6] = (base >> 0) & 0xFF;
+	//printf("base=%08x\n", base);
+	//printf("%02x %02x %02x %02x %02x %02x %02x\n", buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6]);
+	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
+		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
+		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
+		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+#if 0
+	nanosleep(&stime, NULL);
+#endif
+
 	APP_CHECK_STATUS(status);
 	return status;
 }
+static FT_STATUS write_word(uint32 address, uint32 data)
+{
+	uint32 sizeToTransfer = 3+4; //24 + 32 bit = 7 bytes
+	uint32 sizeTransfered = 0;
+	uint8 writeComplete=0;
+	uint32 retry=0;
+	FT_STATUS status;
 
-/*!
- * \brief Main function / Entry point to the sample application
- *
- * This function is the entry point to the sample application. It opens the channel, writes to the
- * EEPROM and reads back.
- *
- * \param[in] none
- * \return Returns 0 for success
- * \sa
- * \note
- * \warning
- */
-int main()
+	buffer[0] = 0xc0; //write command
+	buffer[0] |= (address >> 16) & 0xFF;
+	buffer[1] = (address >> 8) & 0xFF;
+	buffer[2] = (address >> 0) & 0xFF;
+	buffer[3] = (data >> 24) & 0xFF;
+	buffer[4] = (data >> 16) & 0xFF;
+	buffer[5] = (data >> 8) & 0xFF;
+	buffer[6] = (data >> 0) & 0xFF;
+	//printf("address=%08x data=%08x\n", address, data);
+	//printf("%02x %02x %02x %02x %02x %02x %02x\n", buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6]);
+	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
+		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
+		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
+		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+#if 0
+	nanosleep(&stime, NULL);
+#endif
+
+	APP_CHECK_STATUS(status);
+	return status;
+}
+static FT_STATUS write_multi_word(uint32 address, uint8 *data, uint32 length)
+{
+	uint32 sizeToTransfer = 3+length; //24 + 32 bit = 7 bytes
+	uint32 sizeTransfered = 0;
+	uint8 writeComplete=0;
+	uint32 retry=0;
+	FT_STATUS status;
+
+	buffer[0] = 0xc0; //write command
+	buffer[0] |= (address >> 16) & 0xFF;
+	buffer[1] = (address >> 8) & 0xFF;
+	buffer[2] = (address >> 0) & 0xFF;
+	memcpy(&buffer[3], data, length);
+	//printf("address=%08x data=%08x\n", address, data);
+	//printf("%02x %02x %02x %02x %02x %02x %02x\n", buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6]);
+	status = SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
+		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
+		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
+		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+#if 0
+	nanosleep(&stime, NULL);
+#endif
+
+	APP_CHECK_STATUS(status);
+	return status;
+}
+#define SRAM_INITIAL_START 0x10000
+#define SRAM_ADDR_IN_BACK(addr)  (addr & 0xFFFF)
+#define SRAM_VALUE(value)  (value & 0xFFFFF)
+#define SRAM_LAST_ADDR     0xFFFC
+#define SRAM_BANK(addr) ((addr & 0xF0000) >> 16)
+#define SRAM_BANK_COUNT 13
+static uint32 sram_initial_value(uint32 addr)
+{
+	return SRAM_INITIAL_START | (SRAM_ADDR_IN_BACK(addr)>>2);
+}
+int main(void)
 {
 	FT_STATUS status = FT_OK;
+#ifdef CONFIG_SHOW_CHANNEL_INFO
 	FT_DEVICE_LIST_INFO_NODE devList = {0};
+#endif
 	ChannelConfig channelConf = {0};
-	uint8 address = 0;
+	uint32 address = 0;
 	uint32 channels = 0;
-	uint16 data = 0;
-	uint8 i = 0;
-	uint8 latency = 255;	
+	uint32 data = 0;
+	uint32 *p;
+	uint32 *q;
+	uint32 i = 0;
+	uint8 latency = 2;	//milliseconds, USB handle freq.
 	
-	channelConf.ClockRate = 5000;
+	channelConf.ClockRate = SPI_CLK_RATE;
 	channelConf.LatencyTimer = latency;
-	channelConf.configOptions = SPI_CONFIG_OPTION_MODE0 | SPI_CONFIG_OPTION_CS_DBUS3;// | SPI_CONFIG_OPTION_CS_ACTIVELOW;
+	channelConf.configOptions = SPI_CONFIG_OPTION_MODE0 | SPI_CONFIG_OPTION_CS_DBUS3 | SPI_CONFIG_OPTION_CS_ACTIVELOW;
 	channelConf.Pin = 0x00000000;/*FinalVal-FinalDir-InitVal-InitDir (for dir 0=in, 1=out)*/
 
 	/* init library */
-#ifdef _MSC_VER
-	Init_libMPSSE();
-#endif
 	status = SPI_GetNumChannels(&channels);
 	APP_CHECK_STATUS(status);
-	printf("Number of available SPI channels = %d\n",(int)channels);
+	if (FT_OK != status)
+		goto fail;
+	//printf("Number of available SPI channels = %d\n",(int)channels);
+	printf("[SPI] buffer:%p len:%08lx\n", buffer, sizeof(buffer));
+	printf("[SPI] ram_buffer:%p len:%08lx\n", ram_buffer, sizeof(ram_buffer));
+	printf("[SPI] rand_buffer:%p len:%08lx\n", rand_buffer, sizeof(rand_buffer));
+	printf("[SPI] set clock = %d Hz\n", SPI_CLK_RATE);
 
-	if(channels>0)
+	if (channels>0)
 	{
-		for(i=0;i<channels;i++)
+#ifdef CONFIG_SHOW_CHANNEL_INFO
+		for (i=0;i<channels;i++)
 		{
 			status = SPI_GetChannelInfo(i,&devList);
 			APP_CHECK_STATUS(status);
+			if (FT_OK != status)
+				goto fail;
 			printf("Information on channel number %d:\n",i);
 			/* print the dev info */
 			printf("		Flags=0x%x\n",devList.Flags);
@@ -289,67 +264,77 @@ int main()
 			printf("		Description=%s\n",devList.Description);
 			printf("		ftHandle=%p\n",devList.ftHandle);/*is 0 unless open*/
 		}
+#endif
 
 		/* Open the first available channel */
 		status = SPI_OpenChannel(CHANNEL_TO_OPEN,&ftHandle);
 		APP_CHECK_STATUS(status);
-		printf("\nhandle=%p status=0x%x\n",ftHandle,status);
+		if (FT_OK != status)
+			goto fail;
+		puts("[SPI] open channel");
+		//printf("\nhandle=%p status=0x%x\n",ftHandle,status);
 		status = SPI_InitChannel(ftHandle,&channelConf);
 		APP_CHECK_STATUS(status);
+		if (FT_OK != status)
+			goto fail;
+		puts("[SPI] init channel");
 
-#if USE_WRITEREAD	
+		/* register test */
+#if 0
+		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address++)
 		{
-			uint8 k,l;
-			uint8 inBuffer[100];
-			uint8 outBuffer[]={0x81,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,30,31,32,33,34,35,36,37,38,39};
-			uint32 sizeToTransfer,sizeTransferred;
-			for(k=0; k<5; k++)
-			{
-				printf("LoopCount = %u ",(unsigned)k);
-				sizeToTransfer=10;
-				sizeTransferred=0;
-#if 1 // BYTES
-				status = SPI_ReadWrite(ftHandle, inBuffer, outBuffer+k, sizeToTransfer, &sizeTransferred,
-					SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
-					SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
-					SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-#else // BITES
-				status = SPI_ReadWrite(ftHandle, inBuffer, outBuffer+k, sizeToTransfer*8, &sizeTransferred,
-					SPI_TRANSFER_OPTIONS_SIZE_IN_BITS|
-					SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
-					SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+			printf("writing address = %02d data = %d\n",address,address+ADDR_STEP);
+			write_word(address,address+ADDR_STEP);
+		}
 #endif
-				APP_CHECK_STATUS(status);
-				printf("status=0x%x sizeTransferred=%u\n", status, sizeTransferred);
-				for(l=0;l<sizeToTransfer;l++)
-					printf("0x%x\n",(unsigned)inBuffer[l]);
-				printf("\n");
-			}
-		}		
-#else // USE_WRITEREAD
-		for(address=START_ADDRESS_EEPROM;address<END_ADDRESS_EEPROM;address++)
+
+		/* RAM test */
+		//initial value check
+		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
 		{
-			printf("writing address = %02d data = %d\n",address,address+DATA_OFFSET);
-			write_byte(SPI_SLAVE_0, address,(uint16)address+DATA_OFFSET);
+			write_base(address);
+			read_multi_word(address,ram_buffer,0x1000);
+		}
+		for (i=0, p = (uint32 *)ram_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++)
+		{
+			if (*p != sram_initial_value(i)) {
+				printf("RAM value Fail: [0x%06X] %08X != %08X\n", i, *p, sram_initial_value(i));
+				goto fail;
+			}
 		}
 
-		for(address=START_ADDRESS_EEPROM;address<END_ADDRESS_EEPROM;address++)
+		//random data, write, read back, check
+		srand(41);
+		for (i=0, p = (uint32 *)rand_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++)
 		{
-			read_byte(SPI_SLAVE_0, address,&data);
-			printf("reading address = %02d data = %d\n",address,data);
+			*p = SRAM_VALUE(rand());
+			//printf("[%d] %p=0x%08x\n", i, p, *p);
 		}
-#endif // USE_WRITEREAD
+		memcpy(ram_buffer, rand_buffer, RAM_TEST_BUFFER_SIZE); //rand_buffer -> ram_buffer
+		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
+		{
+			write_base(address);
+			write_multi_word(address,ram_buffer,0x1000);
+		}
+		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
+		{
+			write_base(address);
+			read_multi_word(address,ram_buffer,0x1000);
+		}
+		for (i=0, p = (uint32 *)ram_buffer, q = (uint32 *)rand_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++, q++)
+		{
+			if (*p != *q) {
+				printf("RAM value Fail: [0x%06X] %08X != %08X\n", i, *p, *q);
+				goto fail;
+			}
+		}
 
 		status = SPI_CloseChannel(ftHandle);
 	}
 
-#ifdef _MSC_VER
-	Cleanup_libMPSSE();
-#endif
-
-#ifndef __linux__
-	system("pause");
-#endif
 	return 0;
+fail:
+	printf("failed\n");
+	return 1;
 }
 
