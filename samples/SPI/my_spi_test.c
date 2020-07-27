@@ -6,7 +6,7 @@
 #include<stdlib.h>
 #include<string.h>
 /* OS specific libraries */
-#include<time.h>
+#include<sys/time.h>
 
 /* Include D2XX header*/
 #include "ftd2xx.h"
@@ -40,7 +40,6 @@ static FT_HANDLE ftHandle;
 static uint8 buffer[SPI_DEVICE_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
 static uint8 ram_buffer[RAM_TEST_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
 static uint8 rand_buffer[RAM_TEST_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
-static struct timespec stime = { 0, 5*(1000000000/SPI_CLK_RATE) }; //sleep 10ms
 
 /******************************************************************************/
 /*						Public function definitions						 	  */
@@ -147,9 +146,6 @@ static FT_STATUS write_base(uint32 base)
 		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-#if 0
-	nanosleep(&stime, NULL);
-#endif
 
 	APP_CHECK_STATUS(status);
 	return status;
@@ -176,9 +172,6 @@ static FT_STATUS write_word(uint32 address, uint32 data)
 		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-#if 0
-	nanosleep(&stime, NULL);
-#endif
 
 	APP_CHECK_STATUS(status);
 	return status;
@@ -207,9 +200,6 @@ static FT_STATUS write_multi_word(uint32 address, uint8 *data, uint32 length)
 		SPI_TRANSFER_OPTIONS_SIZE_IN_BYTES|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE|
 		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
-#if 0
-	nanosleep(&stime, NULL);
-#endif
 
 rc:
 	APP_CHECK_STATUS(status);
@@ -241,8 +231,9 @@ int main(void)
 	uint32 data = 0;
 	uint32 *p;
 	uint32 *q;
-	uint32 i = 0;
+	uint32 i, j;
 	uint8 latency = 2;	//milliseconds, USB handle freq.
+	struct timeval ta, tb, tres;
 	
 	channelConf.ClockRate = SPI_CLK_RATE;
 	channelConf.LatencyTimer = latency;
@@ -262,6 +253,7 @@ int main(void)
 		printf("[SPI] ram_buffer:%p len:%08lx\n", ram_buffer, sizeof(ram_buffer));
 		printf("[SPI] rand_buffer:%p len:%08lx\n", rand_buffer, sizeof(rand_buffer));
 		printf("[SPI] set clock = %d Hz\n", SPI_CLK_RATE);
+
 #ifdef CONFIG_SHOW_CHANNEL_INFO
 		for (i=0;i<channels;i++)
 		{
@@ -295,13 +287,18 @@ int main(void)
 		printf("[SPI] init channel %c\n", CHANNEL_TO_OPEN ? 'B' : 'A');
 
 		/* register test */
-#if 0
-		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address++)
-		{
-			printf("writing address = %02d data = %d\n",address,address+ADDR_STEP);
-			write_word(address,address+ADDR_STEP);
-		}
-#endif
+		printf("[SPI] Register access test: ");
+		gettimeofday(&ta, NULL);
+		address = 0xe0b00;
+		write_base(address);
+		read_multi_word(address,ram_buffer,0x10);
+		//for (i=0; i<0x10; i+=ADDR_STEP)
+		//{
+		//	printf("%02x %02x %02x %02x\n", ram_buffer[i], ram_buffer[i+1], ram_buffer[i+2], ram_buffer[i+3]);
+		//}
+		gettimeofday(&tb, NULL);
+		timersub(&tb, &ta, &tres);
+		printf("Pass (%ld.%06ld seconds)\n", tres.tv_sec, tres.tv_usec);
 
 		/* RAM test */
 		//initial value check
@@ -319,30 +316,38 @@ int main(void)
 		}
 
 		//random data, write, read back, check
-		srand(41);
-		for (i=0, p = (uint32 *)rand_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++)
+		printf("[SPI] RAM access test: ");
+		gettimeofday(&ta, NULL);
+		for (j=0; j<2; j++)
 		{
-			*p = swap32(SRAM_VALUE(rand()));
-			//printf("[%d] %p=0x%08x\n", i, p, *p);
-		}
-		memcpy(ram_buffer, rand_buffer, RAM_TEST_BUFFER_SIZE); //rand_buffer -> ram_buffer
-		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
-		{
-			write_base(address);
-			write_multi_word(address,ram_buffer+address,0x1000);
-		}
-		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
-		{
-			write_base(address);
-			read_multi_word(address,ram_buffer+address,0x1000);
-		}
-		for (i=0, p = (uint32 *)ram_buffer, q = (uint32 *)rand_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++, q++)
-		{
-			if (*p != *q) {
-				printf("RAM value Fail: [0x%06X] %08X != %08X\n", i, swap32(*p), swap32(*q));
-				goto fail;
+			srand(41);
+			for (i=0, p = (uint32 *)rand_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++)
+			{
+				*p = swap32(SRAM_VALUE(rand()));
+				//printf("[%d] %p=0x%08x\n", i, p, *p);
+			}
+			memcpy(ram_buffer, rand_buffer, RAM_TEST_BUFFER_SIZE); //rand_buffer -> ram_buffer
+			for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
+			{
+				write_base(address);
+				write_multi_word(address,ram_buffer+address,0x1000);
+			}
+			for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
+			{
+				write_base(address);
+				read_multi_word(address,ram_buffer+address,0x1000);
+			}
+			for (i=0, p = (uint32 *)ram_buffer, q = (uint32 *)rand_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++, q++)
+			{
+				if (*p != *q) {
+					printf("RAM value Fail: [0x%06X] %08X != %08X\n", i, swap32(*p), swap32(*q));
+					goto fail;
+				}
 			}
 		}
+		gettimeofday(&tb, NULL);
+		timersub(&tb, &ta, &tres);
+		printf("Pass (%ld.%06ld seconds)\n", tres.tv_sec, tres.tv_usec);
 
 		//initial value restore
 		for (i=0, p = (uint32 *)ram_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++)
