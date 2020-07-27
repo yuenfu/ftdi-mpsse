@@ -210,6 +210,10 @@ static FT_STATUS write_multi_word(uint32 address, uint8 *data, uint32 length)
 #define SRAM_LAST_ADDR     0xFFFC
 #define SRAM_BANK(addr) ((addr & 0xF0000) >> 16)
 #define SRAM_BANK_COUNT 13
+#define swap32(x)							\
+	(uint32)(((uint32)(x) & 0xff) << 24 |				\
+	((uint32)(x) & 0xff00) << 8 | ((uint32)(x) & 0xff0000) >> 8 |	\
+	((uint32)(x) & 0xff000000) >> 24)
 static uint32 sram_initial_value(uint32 addr)
 {
 	return SRAM_INITIAL_START | (SRAM_ADDR_IN_BACK(addr)>>2);
@@ -240,13 +244,13 @@ int main(void)
 	if (FT_OK != status)
 		goto fail;
 	//printf("Number of available SPI channels = %d\n",(int)channels);
-	printf("[SPI] buffer:%p len:%08lx\n", buffer, sizeof(buffer));
-	printf("[SPI] ram_buffer:%p len:%08lx\n", ram_buffer, sizeof(ram_buffer));
-	printf("[SPI] rand_buffer:%p len:%08lx\n", rand_buffer, sizeof(rand_buffer));
-	printf("[SPI] set clock = %d Hz\n", SPI_CLK_RATE);
 
 	if (channels>0)
 	{
+		printf("[SPI] buffer:%p len:%08lx\n", buffer, sizeof(buffer));
+		printf("[SPI] ram_buffer:%p len:%08lx\n", ram_buffer, sizeof(ram_buffer));
+		printf("[SPI] rand_buffer:%p len:%08lx\n", rand_buffer, sizeof(rand_buffer));
+		printf("[SPI] set clock = %d Hz\n", SPI_CLK_RATE);
 #ifdef CONFIG_SHOW_CHANNEL_INFO
 		for (i=0;i<channels;i++)
 		{
@@ -293,12 +297,12 @@ int main(void)
 		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
 		{
 			write_base(address);
-			read_multi_word(address,ram_buffer,0x1000);
+			read_multi_word(address,ram_buffer+address,0x1000);
 		}
 		for (i=0, p = (uint32 *)ram_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++)
 		{
-			if (*p != sram_initial_value(i)) {
-				printf("RAM value Fail: [0x%06X] %08X != %08X\n", i, *p, sram_initial_value(i));
+			if (swap32(*p) != sram_initial_value(i)) {
+				printf("RAM value Fail: [0x%06X] %08X != %08X\n", i, swap32(*p), sram_initial_value(i));
 				goto fail;
 			}
 		}
@@ -307,29 +311,33 @@ int main(void)
 		srand(41);
 		for (i=0, p = (uint32 *)rand_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++)
 		{
-			*p = SRAM_VALUE(rand());
+			*p = swap32(SRAM_VALUE(rand()));
 			//printf("[%d] %p=0x%08x\n", i, p, *p);
 		}
 		memcpy(ram_buffer, rand_buffer, RAM_TEST_BUFFER_SIZE); //rand_buffer -> ram_buffer
 		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
 		{
 			write_base(address);
-			write_multi_word(address,ram_buffer,0x1000);
+			write_multi_word(address,ram_buffer+address,0x1000);
 		}
 		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
 		{
 			write_base(address);
-			read_multi_word(address,ram_buffer,0x1000);
+			read_multi_word(address,ram_buffer+address,0x1000);
 		}
 		for (i=0, p = (uint32 *)ram_buffer, q = (uint32 *)rand_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++, q++)
 		{
 			if (*p != *q) {
-				printf("RAM value Fail: [0x%06X] %08X != %08X\n", i, *p, *q);
+				printf("RAM value Fail: [0x%06X] %08X != %08X\n", i, swap32(*p), swap32(*q));
 				goto fail;
 			}
 		}
 
 		status = SPI_CloseChannel(ftHandle);
+	}
+	else {
+		printf("no available SPI channels!!!\n");
+		goto fail;
 	}
 
 	return 0;
