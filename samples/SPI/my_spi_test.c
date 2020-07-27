@@ -275,13 +275,13 @@ int main(void)
 		APP_CHECK_STATUS(status);
 		if (FT_OK != status)
 			goto fail;
-		puts("[SPI] open channel");
+		printf("[SPI] open channel %c\n", CHANNEL_TO_OPEN ? 'B' : 'A');
 		//printf("\nhandle=%p status=0x%x\n",ftHandle,status);
 		status = SPI_InitChannel(ftHandle,&channelConf);
 		APP_CHECK_STATUS(status);
 		if (FT_OK != status)
 			goto fail;
-		puts("[SPI] init channel");
+		printf("[SPI] init channel %c\n", CHANNEL_TO_OPEN ? 'B' : 'A');
 
 		/* register test */
 #if 0
