@@ -92,6 +92,11 @@ static FT_STATUS read_multi_word(uint32 address, uint8 *data, uint32 length)
 	uint32 retry=0;
 	FT_STATUS status;
 
+	if (length > 0x1000) {
+		status = FT_INVALID_PARAMETER;
+		goto rc;
+	}
+
 	/* Write command + 4K offset */
 	sizeToTransfer=3;
 	sizeTransfered=0;
@@ -119,8 +124,8 @@ static FT_STATUS read_multi_word(uint32 address, uint8 *data, uint32 length)
 	//printf("data=%08x\n", *data);
 	//printf("%02x %02x %02x %02x\n", buffer[0], buffer[1], buffer[2], buffer[3]);
 
-	APP_CHECK_STATUS(status);
 rc:
+	APP_CHECK_STATUS(status);
 	return status;
 }
 static FT_STATUS write_base(uint32 base)
@@ -186,6 +191,11 @@ static FT_STATUS write_multi_word(uint32 address, uint8 *data, uint32 length)
 	uint32 retry=0;
 	FT_STATUS status;
 
+	if (length > 0x1000) {
+		status = FT_INVALID_PARAMETER;
+		goto rc;
+	}
+
 	buffer[0] = 0xc0; //write command
 	buffer[0] |= (address >> 16) & 0xFF;
 	buffer[1] = (address >> 8) & 0xFF;
@@ -201,6 +211,7 @@ static FT_STATUS write_multi_word(uint32 address, uint8 *data, uint32 length)
 	nanosleep(&stime, NULL);
 #endif
 
+rc:
 	APP_CHECK_STATUS(status);
 	return status;
 }
