@@ -333,6 +333,17 @@ int main(void)
 			}
 		}
 
+		//initial value restore
+		for (i=0, p = (uint32 *)ram_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++)
+		{
+			*p = swap32(sram_initial_value(i));
+		}
+		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
+		{
+			write_base(address);
+			write_multi_word(address,ram_buffer+address,0x1000);
+		}
+
 		status = SPI_CloseChannel(ftHandle);
 	}
 	else {
