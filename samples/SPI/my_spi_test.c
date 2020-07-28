@@ -24,7 +24,7 @@
 encountered \n",__FILE__, __LINE__, __FUNCTION__);exit(1);}else{;}};
 
 /* Application specific macro definations */
-#define SPI_CLK_RATE 6000000 //Hz
+#define SPI_CLK_RATE 10000000 //Hz
 #define SPI_DEVICE_BUFFER_SIZE		(0x1000+3) //4kiB + 3B(command + address)
 #define SPI_WRITE_COMPLETION_RETRY		10
 #define START_ADDRESS_RAM 	0x00000
@@ -40,6 +40,38 @@ static FT_HANDLE ftHandle;
 static uint8 buffer[SPI_DEVICE_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
 static uint8 ram_buffer[RAM_TEST_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
 static uint8 rand_buffer[RAM_TEST_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
+static uint32 reg_init[] = {
+	0x005babe0 ,
+	0x00400310 ,
+	0x93496f0e ,
+	0x008ffc33 ,
+	0x00000000 ,
+	0x96c0a331 ,
+	0x04fb4000 ,
+	0xfbbc9140 ,
+	0x00002400 ,
+	0x26646361 ,
+	0x80000a91 ,
+	0x11000000 ,
+	0x00004920 ,
+	0x72495a31 ,
+	0x00703118 ,
+	0x00910394 ,
+	0x005e2a92 ,
+	0x000723c3 ,
+	0x0000110c ,
+	0x2411badb ,
+	0x026225db ,
+	0x89458689 ,
+	0x00000000 ,
+	0x00516182 ,
+	0x00010000 ,
+	0x00000000 ,
+	0x00000000 ,
+	0x00000000 ,
+	0x02c4a214 ,
+	0x00003bc8 ,
+};
 
 /******************************************************************************/
 /*						Public function definitions						 	  */
@@ -289,13 +321,18 @@ int main(void)
 		/* register test */
 		printf("[SPI] Register access test: ");
 		gettimeofday(&ta, NULL);
+		//initial value check
 		address = 0xe0b00;
 		write_base(address);
-		read_multi_word(address,ram_buffer,0x10);
-		//for (i=0; i<0x10; i+=ADDR_STEP)
-		//{
-		//	printf("%02x %02x %02x %02x\n", ram_buffer[i], ram_buffer[i+1], ram_buffer[i+2], ram_buffer[i+3]);
-		//}
+		read_multi_word(address,ram_buffer,30*ADDR_STEP);
+		for (i=0; i<30*ADDR_STEP; i+=ADDR_STEP)
+		{
+			p = (uint32 *) &ram_buffer[i];
+			if (swap32(*p) != reg_init[(i/ADDR_STEP)]) {
+				printf("register value Fail: [0x%06X] %08X != %08X\n", address+i, swap32(*p), reg_init[(i/ADDR_STEP)]);
+				goto fail;
+			}
+		}
 		gettimeofday(&tb, NULL);
 		timersub(&tb, &ta, &tres);
 		printf("Pass (%ld.%06ld seconds)\n", tres.tv_sec, tres.tv_usec);
