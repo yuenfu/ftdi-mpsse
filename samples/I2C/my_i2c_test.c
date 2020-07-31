@@ -39,6 +39,38 @@ static FT_HANDLE ftHandle;
 static uint8 buffer[I2C_DEVICE_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
 static uint8 ram_buffer[RAM_TEST_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
 static uint8 rand_buffer[RAM_TEST_BUFFER_SIZE] __attribute__((aligned(4))) = {0};
+static uint32 reg_init[] = {
+	0x005babe0 ,
+	0x00400310 ,
+	0x93496f0e ,
+	0x008ffc33 ,
+	0x00000000 ,
+	0x96c0a331 ,
+	0x04fb4000 ,
+	0xfbbc9140 ,
+	0x00002400 ,
+	0x26646361 ,
+	0x80000a91 ,
+	0x11000000 ,
+	0x00004920 ,
+	0x72495a31 ,
+	0x00703118 ,
+	0x00910394 ,
+	0x005e2a92 ,
+	0x000723c3 ,
+	0x0000110c ,
+	0x2411badb ,
+	0x026225db ,
+	0x89458689 ,
+	0x00000000 ,
+	0x00516182 ,
+	0x00010000 ,
+	0x00000000 ,
+	0x00000000 ,
+	0x00000000 ,
+	0x02c4a214 ,
+	0x00003bc8 ,
+};
 
 /******************************************************************************/
 /*						Public function definitions						 	  */
@@ -63,7 +95,7 @@ static FT_STATUS I2cReadReg(BYTE regAddr, BYTE* pData, ULONG ulLength)
 
 	memcpy(pData, Buffer, 1);
 
-    return ack;
+	return ack;
 }
 static FT_STATUS I2cWriteReg(BYTE regAddr, BYTE* pData, ULONG ulLength)
 {
@@ -261,14 +293,13 @@ int main(void)
 			goto fail;
 		printf("[I2C] init channel %c\n", CHANNEL_TO_OPEN ? 'B' : 'A');
 
-
 #if 0
 		data = 0x0e0e0e0e;
 		I2cWriteReg(0x6, (char *)&data, 1);
 #endif
 #if 0
 		I2cReadReg(0x7, (char *)&data, 1);
-        printf("data = %08x\n", data);
+		printf("data = %08x\n", data);
 #endif
 #if 1
 		address = 0xe0b00;
@@ -278,25 +309,26 @@ int main(void)
 		/* register test */
 		printf("[I2C] Register access test: ");
 		gettimeofday(&ta, NULL);
+		//initial value check
 		address = 0xe0b00;
-		read_word(address,ram_buffer);
-		//for (i=0; i<0x10; i+=ADDR_STEP)
-		//{
-		//	printf("%02x %02x %02x %02x\n", ram_buffer[i], ram_buffer[i+1], ram_buffer[i+2], ram_buffer[i+3]);
-		//}
+		for (i=0; i<30*ADDR_STEP; i+=ADDR_STEP)
+		{
+			read_word(address+i,(uint32 *)ram_buffer);
+			p = (uint32 *)ram_buffer;
+			if (swap32(*p) != reg_init[(i/ADDR_STEP)]) {
+				printf("register value Fail: [0x%06X] %08X != %08X\n", address+i, swap32(*p), reg_init[(i/ADDR_STEP)]);
+				goto fail;
+			}
+		}
 		gettimeofday(&tb, NULL);
 		timersub(&tb, &ta, &tres);
 		printf("Pass (%ld.%06ld seconds)\n", tres.tv_sec, tres.tv_usec);
 
 		/* RAM test */
 		//initial value check
-		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
-		{
-			write_base(address);
-			read_multi_word(address,ram_buffer+address,0x1000);
-		}
 		for (i=0, p = (uint32 *)ram_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++)
 		{
+			read_word(address+i, p);
 			if (swap32(*p) != sram_initial_value(i)) {
 				printf("RAM value Fail: [0x%06X] %08X != %08X\n", i, swap32(*p), sram_initial_value(i));
 				goto fail;
@@ -315,15 +347,13 @@ int main(void)
 				//printf("[%d] %p=0x%08x\n", i, p, *p);
 			}
 			memcpy(ram_buffer, rand_buffer, RAM_TEST_BUFFER_SIZE); //rand_buffer -> ram_buffer
-			for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
+			for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=ADDR_STEP)
 			{
-				write_base(address);
-				write_multi_word(address,ram_buffer+address,0x1000);
+				write_word(address,ram_buffer[address]);
 			}
-			for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
+			for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=ADDR_STEP)
 			{
-				write_base(address);
-				read_multi_word(address,ram_buffer+address,0x1000);
+				read_word(address,(uint32 *)&ram_buffer[address]);
 			}
 			for (i=0, p = (uint32 *)ram_buffer, q = (uint32 *)rand_buffer; i<RAM_TEST_BUFFER_SIZE; i+=ADDR_STEP, p++, q++)
 			{
@@ -342,10 +372,9 @@ int main(void)
 		{
 			*p = swap32(sram_initial_value(i));
 		}
-		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
+		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=ADDR_STEP)
 		{
-			write_base(address);
-			write_multi_word(address,ram_buffer+address,0x1000);
+			write_word(address,ram_buffer[address]);
 		}
 #endif
 
