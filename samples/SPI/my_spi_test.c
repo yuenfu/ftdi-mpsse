@@ -366,7 +366,6 @@ int main(void)
 			memcpy(ram_buffer, rand_buffer, RAM_TEST_BUFFER_SIZE); //rand_buffer -> ram_buffer
 			for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
 			{
-				write_base(address);
 				write_multi_word(address,ram_buffer+address,0x1000);
 			}
 			for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
@@ -393,7 +392,6 @@ int main(void)
 		}
 		for (address=START_ADDRESS_RAM;address<END_ADDRESS_RAM;address+=0x1000)
 		{
-			write_base(address);
 			write_multi_word(address,ram_buffer+address,0x1000);
 		}
 
