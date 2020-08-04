@@ -72,6 +72,20 @@ static uint32 reg_init[] = {
 	0x02c4a214 ,
 	0x00003bc8 ,
 };
+#define REG_TEST_NUM 10
+static uint32 reg_test[REG_TEST_NUM][3] = {
+	//address, write data, expected data
+	{ 0xF0A00, 0x7e3ef2d5, 0x7e3ef2d5 }, //WiFi RF0 LNA
+	{ 0xF1F00, 0x582834b4, 0x582834b4 }, //BLE TEST4
+	{ 0xFA058, 0x9d1cca1d, 0x9d1c0040 }, //DBB058
+	{ 0xFB018, 0x8fef8c72, 0x070f0c32 }, //TM018 gain_menu
+	{ 0xF0D0C, 0x68f0e8e5, 0x68f0e8e5 }, //WiFi PMA3
+	{ 0xFA010, 0x0ec56bc9, 0x02c503c9 }, //DBB010
+	{ 0xF1C00, 0x572e6703, 0x572e6703 }, //BLE ADC0 adc_reg
+	{ 0xF1B2C, 0x386bee7a, 0x386bee7a }, //BLE PLL11 clkc_div_reg1
+	{ 0xF2044, 0x209fcd95, 0x209fcd95 }, //MUX17
+	{ 0xF0F08, 0xec899b07, 0xec899b07 }, //WiFi TEST2
+};
 
 /******************************************************************************/
 /*						Public function definitions						 	  */
@@ -321,7 +335,8 @@ int main(void)
 		/* register test */
 		printf("[SPI] Register access test: ");
 		gettimeofday(&ta, NULL);
-		//initial value check
+#if 0
+		//initial value check for old rf register
 		address = 0xe0b00;
 		write_base(address);
 		read_multi_word(address,ram_buffer,30*ADDR_STEP);
@@ -330,6 +345,21 @@ int main(void)
 			p = (uint32 *) &ram_buffer[i];
 			if (swap32(*p) != reg_init[(i/ADDR_STEP)]) {
 				printf("register value Fail: [0x%06X] %08X != %08X\n", address+i, swap32(*p), reg_init[(i/ADDR_STEP)]);
+				goto fail;
+			}
+		}
+#endif
+		//write, read back, check
+		for (i=0; i<REG_TEST_NUM; i++)
+		{
+			int wdata=swap32(reg_test[i][1]), data;
+			address = reg_test[i][0];
+			write_multi_word(address,(uint8 *)&wdata,4);
+			write_base(address&0xFFFFF000);
+			read_multi_word(address&0xFFF,(uint8 *)&data,4);
+			wdata=swap32(reg_test[i][2]);
+			if (wdata != data) {
+				printf("RAM value Fail: i=%d [0x%06X] %08X != %08X\n", i, address, swap32(data), wdata);
 				goto fail;
 			}
 		}
